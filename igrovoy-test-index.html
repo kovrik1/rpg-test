@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Тест игрового профиля — 5 осей, 50 вопросов (без сборки)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    html, body { height: 100%; }
+    .likert input { accent-color: #3b82f6; } /* tailwind blue-500 */
+    .muted { color: rgb(113,113,122); }      /* zinc-500-ish */
+  </style>
+</head>
+<body class="min-h-screen bg-white text-zinc-900">
+  <main class="max-w-5xl mx-auto p-4 sm:p-6 md:p-8">
+    <header class="mb-6">
+      <h1 class="text-2xl md:text-3xl font-bold tracking-tight">
+        Тест игрового профиля — 5 осей, 50 вопросов
+      </h1>
+      <p class="text-sm muted mt-1">
+        Оцените каждое утверждение по шкале 1–5. 1 — не согласен, 5 — полностью согласен.
+        Вопросы с пометкой «обратная формулировка» учитываются наоборот.
+      </p>
+    </header>
+
+    <section class="mb-4">
+      <div class="flex items-center justify-between gap-4 border rounded-lg p-4">
+        <div class="text-lg font-medium">Прогресс</div>
+        <div class="text-sm tabular-nums"><span id="answeredCount">0</span> / 50</div>
+      </div>
+      <div class="w-full bg-zinc-200 h-2 rounded mt-2">
+        <div id="progressBar" class="h-2 bg-blue-500 rounded" style="width:0%"></div>
+      </div>
+      <div class="flex flex-wrap gap-3 mt-3 text-xs muted">
+        <span><b>Шкала:</b> 1–5</span>
+        <span>Пары полюсов: S/C, O/R, I/H, T/L, G/P</span>
+        <span>Баланс в коде отображается точкой «·»</span>
+      </div>
+    </section>
+
+    <section id="questionsRoot" class="space-y-6"></section>
+
+    <section class="mt-6 flex flex-wrap gap-3">
+      <button id="calcBtn" class="px-4 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 transition">
+        Подсчитать
+      </button>
+      <button id="resetBtn" class="px-4 py-2 rounded border hover:bg-zinc-50 transition">
+        Сбросить
+      </button>
+    </section>
+
+    <section id="resultsSection" class="mt-6 hidden">
+      <div class="border rounded-lg p-4">
+        <h2 class="text-xl font-semibold mb-3">Результаты</h2>
+        <div class="grid md:grid-cols-2 gap-6">
+          <div class="space-y-3">
+            <div>
+              <div id="codeOut" class="text-2xl font-bold tracking-wide"></div>
+              <p class="text-sm muted">Точка 3.0 — центр; выше — в сторону первого полюса, ниже — второго.</p>
+            </div>
+            <ul id="explains" class="space-y-2 text-sm"></ul>
+            <div class="flex gap-2 pt-2">
+              <button id="copyBtn" class="px-3 py-2 rounded border hover:bg-zinc-50 transition">Скопировать</button>
+              <button id="printBtn" class="px-3 py-2 rounded border hover:bg-zinc-50 transition">Печать/сохранить PDF</button>
+            </div>
+          </div>
+          <div class="h-64 md:h-80">
+            <canvas id="radarChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="mt-12 text-xs muted">
+      <p>
+        Методика: 10 вопросов на ось; обратные формулировки реверсируются (6−оценка), среднее 1–5. 
+        Пороги для букв кода: ≥3.4 — первый полюс; ≤2.5 — второй полюс; между ними — баланс «·».
+      </p>
+    </footer>
+  </main>
+
+<script>
+// ===== Data =====
+const QUESTIONS = [
+  { id: 1,  axis: "SC", poleA: "S", poleB: "C", text: "Мне интереснее решать конфликты переговорами, чем битвами.", reverse: false },
+  { id: 2,  axis: "SC", poleA: "S", poleB: "C", text: "Адреналин боя — главная причина, по которой я играю.", reverse: true },
+  { id: 3,  axis: "SC", poleA: "S", poleB: "C", text: "Самые запоминающиеся сцены — это диалоги и интриги.", reverse: false },
+  { id: 4,  axis: "SC", poleA: "S", poleB: "C", text: "Если можно избежать драки — я избегаю.", reverse: false },
+  { id: 5,  axis: "SC", poleA: "S", poleB: "C", text: "Я выбираю способности в первую очередь ради урона.", reverse: true },
+  { id: 6,  axis: "SC", poleA: "S", poleB: "C", text: "Социальные навыки для меня важнее боевых.", reverse: false },
+  { id: 7,  axis: "SC", poleA: "S", poleB: "C", text: "Сражения — лучший способ продвинуть сюжет.", reverse: true },
+  { id: 8,  axis: "SC", poleA: "S", poleB: "C", text: "Я получаю удовольствие от ролевых дебатов и дипломатии.", reverse: false },
+  { id: 9,  axis: "SC", poleA: "S", poleB: "C", text: "Пускай меньше слов, больше бросков урона.", reverse: true },
+  { id: 10, axis: "SC", poleA: "S", poleB: "C", text: "Я расстраиваюсь, если сессия проходит без значимых разговоров с НПС.", reverse: false },
+
+  { id: 11, axis: "OR", poleA: "O", poleB: "R", text: "Мне нравится, когда направление приключения выбираем мы сами.", reverse: false },
+  { id: 12, axis: "OR", poleA: "O", poleB: "R", text: "Я предпочитаю чётко прописанный сюжет от ГМа.", reverse: true },
+  { id: 13, axis: "OR", poleA: "O", poleB: "R", text: "Свобода шастать «куда глаза глядят» — это кайф.", reverse: false },
+  { id: 14, axis: "OR", poleA: "O", poleB: "R", text: "Когда вариантов слишком много, мне комфортнее, если ГМ ведёт.", reverse: true },
+  { id: 15, axis: "OR", poleA: "O", poleB: "R", text: "Песочница с побочками лучше, чем один главный квест.", reverse: false },
+  { id: 16, axis: "OR", poleA: "O", poleB: "R", text: "Я хочу «киношную» историю по рельсам без лишних отвлечений.", reverse: true },
+  { id: 17, axis: "OR", poleA: "O", poleB: "R", text: "Я люблю искать свой путь и импровизировать цели.", reverse: false },
+  { id: 18, axis: "OR", poleA: "O", poleB: "R", text: "Предпочитаю, чтобы сцены шли в запланированном порядке.", reverse: true },
+  { id: 19, axis: "OR", poleA: "O", poleB: "R", text: "Лучшие сюжеты рождаются из решений игроков, а не из плана.", reverse: false },
+  { id: 20, axis: "OR", poleA: "O", poleB: "R", text: "Мне спокойнее, когда ГМ заранее знает, что будет дальше.", reverse: true },
+
+  { id: 21, axis: "IH", poleA: "I", poleB: "H", text: "Я стараюсь говорить и действовать строго от лица персонажа.", reverse: false },
+  { id: 22, axis: "IH", poleA: "I", poleB: "H", text: "Мой персонаж — скорее «я сам», без лишних заморочек.", reverse: true },
+  { id: 23, axis: "IH", poleA: "I", poleB: "H", text: "Мне важны мотивы, характер и развитие героя.", reverse: false },
+  { id: 24, axis: "IH", poleA: "I", poleB: "H", text: "Если действие нелогично, но весело — я всё равно за.", reverse: true },
+  { id: 25, axis: "IH", poleA: "I", poleB: "H", text: "Последствия поступков персонажа должны ощущаться всерьёз.", reverse: false },
+  { id: 26, axis: "IH", poleA: "I", poleB: "H", text: "Лор и «канон» не так важны — главное, чтобы было угарно.", reverse: true },
+  { id: 27, axis: "IH", poleA: "I", poleB: "H", text: "Я люблю долгие сцены отыгрыша и драму.", reverse: false },
+  { id: 28, axis: "IH", poleA: "I", poleB: "H", text: "Персонаж — инструмент для механик и лута, не больше.", reverse: true },
+  { id: 29, axis: "IH", poleA: "I", poleB: "H", text: "Мне нравится, когда группа держит общий тон и жанр.", reverse: false },
+  { id: 30, axis: "IH", poleA: "I", poleB: "H", text: "«Сломать систему» ради прикола — нормальная цель.", reverse: true },
+
+  { id: 31, axis: "TL", poleA: "T", poleB: "L", text: "Я люблю подробно описывать каждое действие.", reverse: false },
+  { id: 32, axis: "TL", poleA: "T", poleB: "L", text: "Предпочитаю, чтобы говорили другие — я коротко подтвержу.", reverse: true },
+  { id: 33, axis: "TL", poleA: "T", poleB: "L", text: "Мне нравится вести переговоры в диалогах с НПС.", reverse: false },
+  { id: 34, axis: "TL", poleA: "T", poleB: "L", text: "Я скорее слушатель, чем рассказчик за столом.", reverse: true },
+  { id: 35, axis: "TL", poleA: "T", poleB: "L", text: "Мне комфортно брать слово в группе и удерживать внимание.", reverse: false },
+  { id: 36, axis: "TL", poleA: "T", poleB: "L", text: "Лучше меньше слов — важнее броски и итог.", reverse: true },
+  { id: 37, axis: "TL", poleA: "T", poleB: "L", text: "Я охотно делаю атмосферные описания от первого лица.", reverse: false },
+  { id: 38, axis: "TL", poleA: "T", poleB: "L", text: "Я чувствую усталость от долгих монологов игроков.", reverse: true },
+  { id: 39, axis: "TL", poleA: "T", poleB: "L", text: "Я инициативно вступаю в разговоры и сцены.", reverse: false },
+  { id: 40, axis: "TL", poleA: "T", poleB: "L", text: "Слушать мастера и товарищей интереснее, чем говорить самому.", reverse: true },
+
+  { id: 41, axis: "GP", poleA: "G", poleB: "P", text: "Мне нравится предлагать детали мира и сцен (соавторство).", reverse: false },
+  { id: 42, axis: "GP", poleA: "G", poleB: "P", text: "Я предпочитаю, чтобы всё описывал ГМ.", reverse: true },
+  { id: 43, axis: "GP", poleA: "G", poleB: "P", text: "Окей, если игрок описывает, «что за дверью» — даже при риске.", reverse: false },
+  { id: 44, axis: "GP", poleA: "G", poleB: "P", text: "Я не хочу брать на себя обязанности мастера вовсе.", reverse: true },
+  { id: 45, axis: "GP", poleA: "G", poleB: "P", text: "Мне нравится придумывать НПС/локации на лету вместе с ГМ.", reverse: false },
+  { id: 46, axis: "GP", poleA: "G", poleB: "P", text: "Риски и неизвестность должен целиком контролировать ГМ.", reverse: true },
+  { id: 47, axis: "GP", poleA: "G", poleB: "P", text: "Я готов объявлять факты мира, если группа так играет.", reverse: false },
+  { id: 48, axis: "GP", poleA: "G", poleB: "P", text: "Пусть ведущий несёт всё авторство — мне так удобнее.", reverse: true },
+  { id: 49, axis: "GP", poleA: "G", poleB: "P", text: "Я кайфую от механик, где игроки берут «нарративные права».", reverse: false },
+  { id: 50, axis: "GP", poleA: "G", poleB: "P", text: "Я не хочу описывать последствия — лучше спросить мастера.", reverse: true },
+];
+
+const AXES_META = {
+  SC: { a: "S", b: "C", aName: "Социалка", bName: "Боёвка" },
+  OR: { a: "O", b: "R", aName: "Открытый мир", bName: "Рельсы" },
+  IH: { a: "I", b: "H", aName: "Серьёзный отыгрыш", bName: "«Бомжи‑убийцы»" },
+  TL: { a: "T", b: "L", aName: "Говорить", bName: "Слушать" },
+  GP: { a: "G", b: "P", aName: "ГМ (соавторство)", bName: "Игрок (мастер описывает)" },
+};
+
+const reverseScore = (q, val) => (q.reverse ? 6 - val : val);
+
+function computeResults(answers) {
+  const perAxis = { SC: [], OR: [], IH: [], TL: [], GP: [] };
+  for (const q of QUESTIONS) {
+    const v = answers[q.id];
+    if (v) perAxis[q.axis].push(reverseScore(q, v));
+  }
+  const averages = {};
+  for (const axis of Object.keys(perAxis)) {
+    const arr = perAxis[axis];
+    const avg = arr.length ? arr.reduce((a,b)=>a+b,0) / arr.length : 0;
+    averages[axis] = Number(avg.toFixed(2));
+  }
+  const pick = (axisKey) => {
+    const avg = averages[axisKey] ?? 0;
+    if (avg >= 3.4) return AXES_META[axisKey].a;
+    if (avg <= 2.5) return AXES_META[axisKey].b;
+    return "·";
+  };
+  const code = ["SC","OR","IH","TL","GP"].map(pick).join("");
+  return { averages, code };
+}
+
+function explain(avg, aName, bName) {
+  if (!avg) return "—";
+  if (avg >= 4.0) return `Выраженная тяга к: ${aName}`;
+  if (avg >= 3.4) return `Умеренная тяга к: ${aName}`;
+  if (avg <= 1.9) return `Выраженная тяга к: ${bName}`;
+  if (avg <= 2.5) return `Умеренная тяга к: ${bName}`;
+  return "Баланс между полюсами";
+}
+
+// ===== Render questions =====
+const root = document.getElementById("questionsRoot");
+const form = document.createElement("form");
+form.className = "space-y-6";
+
+const groups = { SC: [], OR: [], IH: [], TL: [], GP: [] };
+for (const q of QUESTIONS) groups[q.axis].push(q);
+
+function axisBadge(axis) {
+  const m = AXES_META[axis];
+  const el = document.createElement("span");
+  el.className = "inline-flex items-center gap-2 text-xs font-medium px-2 py-1 rounded-full bg-zinc-100";
+  el.innerHTML = `<b>${m.a}</b><span class="opacity-60">↔</span><b>${m.b}</b>
+    <span class="opacity-60">·</span><span class="opacity-80">${m.aName}</span>
+    <span class="opacity-60">/</span><span class="opacity-80">${m.bName}</span>`;
+  return el;
+}
+
+for (const [axis, list] of Object.entries(groups)) {
+  const acc = document.createElement("section");
+  acc.className = "border rounded-lg p-2";
+
+  const hdr = document.createElement("div");
+  hdr.className = "flex items-center gap-3 p-2";
+  hdr.appendChild(axisBadge(axis));
+  const cnt = document.createElement("span");
+  cnt.className = "text-sm muted";
+  cnt.textContent = `Вопросов: ${list.length}`;
+  hdr.appendChild(cnt);
+  acc.appendChild(hdr);
+
+  const card = document.createElement("div");
+  card.className = "divide-y";
+
+  for (const q of list) {
+    const row = document.createElement("div");
+    row.className = "py-3";
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "flex items-start justify-between gap-4";
+
+    const left = document.createElement("div");
+    left.className = "space-y-1";
+    const p = document.createElement("p");
+    p.className = "text-sm leading-relaxed";
+    p.textContent = `${q.id}. ${q.text}`;
+    left.appendChild(p);
+    left.appendChild(axisBadge(q.axis));
+    if (q.reverse) {
+      const rev = document.createElement("div");
+      rev.className = "text-[11px] uppercase tracking-wider muted";
+      rev.textContent = "Обратная формулировка";
+      left.appendChild(rev);
+    }
+
+    const right = document.createElement("div");
+    right.className = "likert flex items-center gap-3 flex-wrap";
+    for (let s = 1; s <= 5; s++) {
+      const label = document.createElement("label");
+      label.className = "flex items-center gap-2 cursor-pointer select-none";
+      const input = document.createElement("input");
+      input.type = "radio";
+      input.name = `q_${q.id}`;
+      input.value = String(s);
+      input.addEventListener("change", updateProgress);
+      const span = document.createElement("span");
+      span.className = "text-sm";
+      span.textContent = String(s);
+      label.appendChild(input);
+      label.appendChild(span);
+      right.appendChild(label);
+    }
+
+    wrapper.appendChild(left);
+    wrapper.appendChild(right);
+    row.appendChild(wrapper);
+    card.appendChild(row);
+  }
+
+  acc.appendChild(card);
+  form.appendChild(acc);
+}
+
+root.appendChild(form);
+
+// ===== Progress =====
+function getAnswers() {
+  const ans = {};
+  for (const q of QUESTIONS) {
+    const el = form.querySelector(`input[name="q_${q.id}"]:checked`);
+    if (el) ans[q.id] = Number(el.value);
+  }
+  return ans;
+}
+
+function updateProgress() {
+  const ans = getAnswers();
+  const count = Object.keys(ans).length;
+  document.getElementById("answeredCount").textContent = count;
+  const pct = Math.round((count / QUESTIONS.length) * 100);
+  document.getElementById("progressBar").style.width = pct + "%";
+}
+
+updateProgress();
+
+// ===== Buttons =====
+const calcBtn = document.getElementById("calcBtn");
+const resetBtn = document.getElementById("resetBtn");
+const resultsSection = document.getElementById("resultsSection");
+const codeOut = document.getElementById("codeOut");
+const explains = document.getElementById("explains");
+const copyBtn = document.getElementById("copyBtn");
+const printBtn = document.getElementById("printBtn");
+
+let radarChart = null;
+
+calcBtn.addEventListener("click", () => {
+  const answers = getAnswers();
+  if (Object.keys(answers).length < QUESTIONS.length) {
+    alert("Ответьте на все вопросы, чтобы увидеть результаты.");
+    return;
+  }
+  const { averages, code } = computeResults(answers);
+  codeOut.textContent = code;
+
+  explains.innerHTML = "";
+  const items = [
+    ["SC", "S/C (Социалка/Боёвка)"],
+    ["OR", "O/R (Открытый мир/Рельсы)"],
+    ["IH", "I/H (Серьёзный/Бомжи‑убийцы)"],
+    ["TL", "T/L (Говорить/Слушать)"],
+    ["GP", "G/P (ГМ/Игрок)"],
+  ];
+  const linesToCopy = [];
+  linesToCopy.push(`Код профиля: ${code}`);
+  for (const [axis, label] of items) {
+    const avg = averages[axis] || 0;
+    const li = document.createElement("li");
+    li.innerHTML = `<b>${label}</b>: ${avg} — ${explain(avg, AXES_META[axis].aName, AXES_META[axis].bName)}`;
+    explains.appendChild(li);
+    linesToCopy.push(`${label}: ${avg}`);
+  }
+
+  // Chart
+  const data = [
+    averages.SC || 0,
+    averages.OR || 0,
+    averages.IH || 0,
+    averages.TL || 0,
+    averages.GP || 0,
+  ];
+
+  const ctx = document.getElementById("radarChart").getContext("2d");
+  if (radarChart) radarChart.destroy();
+  radarChart = new Chart(ctx, {
+    type: "radar",
+    data: {
+      labels: ["S/C", "O/R", "I/H", "T/L", "G/P"],
+      datasets: [{
+        label: "Среднее (1–5)",
+        data,
+        fill: true,
+        borderWidth: 2,
+        pointRadius: 3
+      }]
+    },
+    options: {
+      responsive: true,
+      scales: {
+        r: { min: 1, max: 5, ticks: { stepSize: 1 } }
+      },
+      plugins: {
+        legend: { display: false }
+      }
+    }
+  });
+
+  resultsSection.classList.remove("hidden");
+
+  // Copy handler content
+  copyBtn.onclick = () => {
+    navigator.clipboard.writeText(linesToCopy.join("\\n"));
+  };
+});
+
+resetBtn.addEventListener("click", () => {
+  for (const q of QUESTIONS) {
+    const checked = form.querySelector(`input[name="q_${q.id}"]:checked`);
+    if (checked) checked.checked = false;
+  }
+  resultsSection.classList.add("hidden");
+  if (radarChart) { radarChart.destroy(); radarChart = null; }
+  updateProgress();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+printBtn.addEventListener("click", () => window.print());
+</script>
+</body>
+</html>
